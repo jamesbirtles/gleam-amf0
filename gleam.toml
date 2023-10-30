@@ -1,0 +1,12 @@
+name = "amf0"
+version = "0.1.0"
+
+description = "Amf0 (de)serialisation for Gleam"
+licences = ["Apache-2.0", "MIT"]
+repository = { type = "github", user = "jamesbirtles", repo = "gleam-amf0" }
+
+[dependencies]
+gleam_stdlib = "~> 0.31"
+
+[dev-dependencies]
+gleeunit = "~> 0.10"
