@@ -1,12 +1,12 @@
-import gleam/map.{Map}
+import gleam/map.{type Map}
 import gleam/bool
 import gleam/string
 import gleam/result
 import gleam/list
-import gleam/bit_string
-import gleam/option.{None, Option, Some}
+import gleam/bit_array
+import gleam/option.{type Option, None, Some}
 import gleam/pair
-import amf0/marker.{Marker}
+import amf0/marker.{type Marker}
 
 pub type Value {
   Number(Float)
@@ -33,12 +33,12 @@ pub type DeserializeError {
   MalformedInput(Marker)
 }
 
-pub fn deserialize(bytes: BitString) -> Result(List(Value), DeserializeError) {
+pub fn deserialize(bytes: BitArray) -> Result(List(Value), DeserializeError) {
   deserialize_next(bytes, [])
 }
 
 fn deserialize_next(
-  bytes: BitString,
+  bytes: BitArray,
   list: List(Value),
 ) -> Result(List(Value), DeserializeError) {
   case bytes {
@@ -51,10 +51,10 @@ fn deserialize_next(
 }
 
 pub fn deserialize_value(
-  bytes: BitString,
-) -> Result(#(Value, BitString), DeserializeError) {
+  bytes: BitArray,
+) -> Result(#(Value, BitArray), DeserializeError) {
   case bytes {
-    <<marker, rest:bit_string>> -> {
+    <<marker, rest:bits>> -> {
       marker.from_int(marker)
       |> result.map_error(UnknownMarker)
       |> result.try(fn(marker) { deserialize_value_from_marker(marker, rest) })
@@ -65,8 +65,8 @@ pub fn deserialize_value(
 
 fn deserialize_value_from_marker(
   marker: Marker,
-  bytes: BitString,
-) -> Result(#(Value, BitString), DeserializeError) {
+  bytes: BitArray,
+) -> Result(#(Value, BitArray), DeserializeError) {
   case marker {
     marker.Number -> deserialize_number(bytes)
     marker.Boolean -> deserialize_bool(bytes)
@@ -80,44 +80,44 @@ fn deserialize_value_from_marker(
 }
 
 fn deserialize_number(
-  bytes: BitString,
-) -> Result(#(Value, BitString), DeserializeError) {
+  bytes: BitArray,
+) -> Result(#(Value, BitArray), DeserializeError) {
   case bytes {
-    <<value:float, rest:bit_string>> -> Ok(#(Number(value), rest))
+    <<value:float, rest:bits>> -> Ok(#(Number(value), rest))
     _ -> Error(MalformedInput(marker.Number))
   }
 }
 
 fn deserialize_bool(
-  bytes: BitString,
-) -> Result(#(Value, BitString), DeserializeError) {
+  bytes: BitArray,
+) -> Result(#(Value, BitArray), DeserializeError) {
   case bytes {
-    <<value, rest:bit_string>> if value == 1 -> Ok(#(Boolean(True), rest))
-    <<value, rest:bit_string>> if value == 0 -> Ok(#(Boolean(False), rest))
+    <<value, rest:bits>> if value == 1 -> Ok(#(Boolean(True), rest))
+    <<value, rest:bits>> if value == 0 -> Ok(#(Boolean(False), rest))
     _ -> Error(MalformedInput(marker.Boolean))
   }
 }
 
 fn deserialize_string(
-  bytes: BitString,
-) -> Result(#(Value, BitString), DeserializeError) {
+  bytes: BitArray,
+) -> Result(#(Value, BitArray), DeserializeError) {
   deserialize_utf8_string(bytes)
   |> result.map(pair.map_first(_, String))
 }
 
 fn deserialize_utf8_string(
-  bytes: BitString,
-) -> Result(#(String, BitString), DeserializeError) {
+  bytes: BitArray,
+) -> Result(#(String, BitArray), DeserializeError) {
   case bytes {
-    <<0:16, rest:bit_string>> -> Ok(#("", rest))
-    <<length:16, bytes:bit_string>> -> {
+    <<0:16, rest:bits>> -> Ok(#("", rest))
+    <<length:16, bytes:bits>> -> {
       use string <- result.try(
-        bit_string.slice(bytes, 0, length)
-        |> result.try(bit_string.to_string)
+        bit_array.slice(bytes, 0, length)
+        |> result.try(bit_array.to_string)
         |> result.replace_error(MalformedInput(marker.String)),
       )
       let rest =
-        bit_string.slice(bytes, length, bit_string.byte_size(bytes) - length)
+        bit_array.slice(bytes, length, bit_array.byte_size(bytes) - length)
         |> result.unwrap(<<>>)
       Ok(#(string, rest))
     }
@@ -126,22 +126,22 @@ fn deserialize_utf8_string(
 }
 
 fn deserialize_object(
-  bytes: BitString,
-) -> Result(#(Value, BitString), DeserializeError) {
+  bytes: BitArray,
+) -> Result(#(Value, BitArray), DeserializeError) {
   use #(properties, bytes) <- result.try(deserialize_object_properties(
     bytes,
     map.new(),
   ))
   case bytes {
-    <<0:16, "":utf8, 0x09, rest:bit_string>> -> Ok(#(Object(properties), rest))
+    <<0:16, "":utf8, 0x09, rest:bits>> -> Ok(#(Object(properties), rest))
     _ -> Error(MalformedInput(marker.Object))
   }
 }
 
 fn deserialize_object_properties(
-  bytes: BitString,
+  bytes: BitArray,
   properties: Map(String, Value),
-) -> Result(#(Map(String, Value), BitString), DeserializeError) {
+) -> Result(#(Map(String, Value), BitArray), DeserializeError) {
   case deserialize_object_property(bytes) {
     Ok(#(Some(#(key, value)), rest)) ->
       deserialize_object_properties(rest, map.insert(properties, key, value))
@@ -151,8 +151,8 @@ fn deserialize_object_properties(
 }
 
 fn deserialize_object_property(
-  bytes: BitString,
-) -> Result(#(Option(#(String, Value)), BitString), DeserializeError) {
+  bytes: BitArray,
+) -> Result(#(Option(#(String, Value)), BitArray), DeserializeError) {
   use #(key, bytes) <- result.try(deserialize_utf8_string(bytes))
   case key {
     "" -> Ok(#(None, bytes))
@@ -164,10 +164,10 @@ fn deserialize_object_property(
 }
 
 fn deserialize_strict_array(
-  bytes: BitString,
-) -> Result(#(Value, BitString), DeserializeError) {
+  bytes: BitArray,
+) -> Result(#(Value, BitArray), DeserializeError) {
   case bytes {
-    <<length:32-unsigned, rest:bit_string>> ->
+    <<length:32-unsigned, rest:bits>> ->
       deserialize_n_values(rest, length, [])
       |> result.map(pair.map_first(_, list.reverse))
       |> result.map(pair.map_first(_, StrictArray))
@@ -176,10 +176,10 @@ fn deserialize_strict_array(
 }
 
 fn deserialize_n_values(
-  bytes: BitString,
+  bytes: BitArray,
   remaining: Int,
   list: List(Value),
-) -> Result(#(List(Value), BitString), DeserializeError) {
+) -> Result(#(List(Value), BitArray), DeserializeError) {
   case remaining {
     0 -> Ok(#(list, bytes))
     _ -> {
@@ -190,14 +190,14 @@ fn deserialize_n_values(
 }
 
 fn deserialize_null(
-  bytes: BitString,
-) -> Result(#(Value, BitString), DeserializeError) {
+  bytes: BitArray,
+) -> Result(#(Value, BitArray), DeserializeError) {
   Ok(#(Null, bytes))
 }
 
 fn deserialize_undefined(
-  bytes: BitString,
-) -> Result(#(Value, BitString), DeserializeError) {
+  bytes: BitArray,
+) -> Result(#(Value, BitArray), DeserializeError) {
   Ok(#(Undefined, bytes))
 }
 
@@ -209,15 +209,15 @@ pub type SerializeError {
 }
 
 /// Serialize a list of amf0 Values into a BitString
-pub fn serialize(values: List(Value)) -> Result(BitString, SerializeError) {
+pub fn serialize(values: List(Value)) -> Result(BitArray, SerializeError) {
   use bs, value <- list.fold(values, Ok(<<>>))
   use bs <- result.try(bs)
   use value <- result.map(serialize_value(value))
-  <<bs:bit_string, value:bit_string>>
+  <<bs:bits, value:bits>>
 }
 
 /// Serialize a single amf0 Value into a BitString
-pub fn serialize_value(value: Value) -> Result(BitString, SerializeError) {
+pub fn serialize_value(value: Value) -> Result(BitArray, SerializeError) {
   case value {
     Number(val) -> Ok(serialize_number(val))
     Boolean(val) -> Ok(serialize_bool(val))
@@ -229,20 +229,20 @@ pub fn serialize_value(value: Value) -> Result(BitString, SerializeError) {
   }
 }
 
-fn serialize_number(value: Float) -> BitString {
+fn serialize_number(value: Float) -> BitArray {
   <<marker.to_int(marker.Number), value:float>>
 }
 
-fn serialize_bool(value: Bool) -> BitString {
+fn serialize_bool(value: Bool) -> BitArray {
   <<marker.to_int(marker.Boolean), bool.to_int(value)>>
 }
 
-fn serialize_string(value: String) -> Result(BitString, SerializeError) {
+fn serialize_string(value: String) -> Result(BitArray, SerializeError) {
   serialize_utf8(value)
-  |> result.map(fn(utf8) { <<marker.to_int(marker.String), utf8:bit_string>> })
+  |> result.map(fn(utf8) { <<marker.to_int(marker.String), utf8:bits>> })
 }
 
-fn serialize_utf8(value: String) -> Result(BitString, SerializeError) {
+fn serialize_utf8(value: String) -> Result(BitArray, SerializeError) {
   case string.byte_size(value) {
     x if x > u16_max -> Error(StringTooLong)
     length -> Ok(<<length:16, value:utf8>>)
@@ -251,11 +251,11 @@ fn serialize_utf8(value: String) -> Result(BitString, SerializeError) {
 
 fn serialize_object(
   value: Map(String, Value),
-) -> Result(BitString, SerializeError) {
+) -> Result(BitArray, SerializeError) {
   use properties <- result.map(serialize_properties(value))
   <<
     marker.to_int(marker.Object),
-    properties:bit_string,
+    properties:bits,
     0:16,
     marker.to_int(marker.ObjectEnd),
   >>
@@ -263,34 +263,28 @@ fn serialize_object(
 
 fn serialize_properties(
   properties: Map(String, Value),
-) -> Result(BitString, SerializeError) {
+) -> Result(BitArray, SerializeError) {
   use bs, key, value <- map.fold(properties, Ok(<<>>))
   use bs <- result.try(bs)
   use key <- result.try(serialize_utf8(key))
   use value <- result.map(serialize_value(value))
-  <<bs:bit_string, key:bit_string, value:bit_string>>
+  <<bs:bits, key:bits, value:bits>>
 }
 
-fn serialize_strict_array(
-  list: List(Value),
-) -> Result(BitString, SerializeError) {
+fn serialize_strict_array(list: List(Value)) -> Result(BitArray, SerializeError) {
   case list.length(list) {
     x if x > u32_max -> Error(StrictArrayTooLong)
     _ -> {
       use items <- result.map(serialize(list))
-      <<
-        marker.to_int(marker.StrictArray),
-        list.length(list):32,
-        items:bit_string,
-      >>
+      <<marker.to_int(marker.StrictArray), list.length(list):32, items:bits>>
     }
   }
 }
 
-fn serialize_null() -> BitString {
+fn serialize_null() -> BitArray {
   <<marker.to_int(marker.Null)>>
 }
 
-fn serialize_undefined() -> BitString {
+fn serialize_undefined() -> BitArray {
   <<marker.to_int(marker.Undefined)>>
 }
